@@ -1,3 +1,6 @@
+/*
+makes system idle for some time proportional to input integer
+*/
 #include "kernel/types.h"
 #include "user/user.h"
 
