@@ -165,6 +165,7 @@ freeproc(struct proc *p)
   p->pid = 0;
   p->parent = 0;
   p->name[0] = 0;
+  p->trace_mask = 0;
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
@@ -322,6 +323,9 @@ fork(void)
   np->state = RUNNABLE;
   release(&np->lock);
 
+  // copy  trace mask
+  np->trace_mask = p->trace_mask;
+  
   return pid;
 }
 

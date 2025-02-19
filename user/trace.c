@@ -1,3 +1,8 @@
+/*
+prints a line when each system call is about to return
+if the system call's number is set in the mask
+*/
+
 #include "kernel/param.h"
 #include "kernel/types.h"
 #include "kernel/stat.h"

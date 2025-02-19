@@ -1,0 +1,23 @@
+Looking at the backtrace output, which function called syscall?
+usertrap() at kernel/trap.c:67
+
+What is the value of p->trapframe->a7 and what does that value represent? (Hint: look user/initcode.S, the first user program xv6 starts.)
+7, it represent system call code for SYS_exec (defined in syscall.h)
+
+What was the previous mode that the CPU was in?
+register value: 0x200000022 (vsstatus) 
+
+Write down the assembly instruction the kernel is panicing at. Which register corresponds to the variable num?
+lw	a3,0(zero), a3
+
+Why does the kernel crash? Hint: look at figure 3-3 in the text; is address 0 mapped in the kernel address space? Is that confirmed by the value in scause above? (See description of scause in RISC-V privileged instructions)
+because it is trying to dereference address 0x0 ((int *) 0 means cast 0 to an address of integer resulting in 0x0)
+from figure 3-3 textbook we can see that address 0x0 until 0x1000 is not mapped in physical address
+the scause 0xd translation from table 4.2 in RISC-V privileged instruction manual is load page fault
+
+What is the name of the process that was running when the kernel paniced? What is its process id (pid)?
+p->name: initcode\000\000\000\000\000\000\000
+p->pid: 1
+
+user/secret.c copies the secret bytes to memory whose address is 32 bytes after the start of a page. Change the 32 to 0 and you should see that your attack doesn't work anymore; why not?
+because the earlier bytes is used to store variables in the attack.c, therefore it will be replaced
