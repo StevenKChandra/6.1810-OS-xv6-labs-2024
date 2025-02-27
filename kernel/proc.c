@@ -210,6 +210,11 @@ proc_pagetable(struct proc *p)
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
+    // try to free the USYSCALL page if it exist
+    // (the /init.c process does not have this)
+    if (*walk(pagetable, USYSCALL, 0) && PTE_V) {
+      uvmunmap(pagetable, USYSCALL, 1, 1);
+    }
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
@@ -311,6 +316,12 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+  
+  // allocate the USYSCALL page and set the usyscall->pid 
+  char* pa = kalloc();
+  struct usyscall *u = (struct usyscall *) pa;
+  u->pid = pid;
+  mappages(np->pagetable, USYSCALL, PGSIZE, (uint64) pa, PTE_R|PTE_U);
 
   release(&np->lock);
 

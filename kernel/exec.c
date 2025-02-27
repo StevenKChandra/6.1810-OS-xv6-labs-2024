@@ -127,6 +127,12 @@ exec(char *path, char **argv)
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
+  
+  // allocate the USYSCALL page and set the usyscall->pid 
+  char* pa = kalloc();
+  struct usyscall *u = (struct usyscall *) pa;
+  u->pid = p->pid;
+  mappages(p->pagetable, USYSCALL, PGSIZE, (uint64) pa, PTE_R|PTE_U);
 
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 

@@ -10,6 +10,7 @@
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);
+void freerangesuper(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
@@ -21,13 +22,16 @@ struct run {
 struct {
   struct spinlock lock;
   struct run *freelist;
+  struct run *freelistsuper;
 } kmem;
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  char* superBoundary = end + 16 * SUPERPGSIZE;
+  freerangesuper(end, superBoundary);
+  freerange(superBoundary, (void*)PHYSTOP);
 }
 
 void
@@ -37,6 +41,15 @@ freerange(void *pa_start, void *pa_end)
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
+}
+
+void
+freerangesuper(void *pa_start, void *pa_end)
+{
+  char *p;
+  p = (char*)SUPERPGROUNDUP((uint64)pa_start);
+  for(; p + SUPERPGSIZE <= (char*)pa_end; p += SUPERPGSIZE)
+    kfreesuper(p);
 }
 
 // Free the page of physical memory pointed at by pa,
@@ -62,6 +75,26 @@ kfree(void *pa)
   release(&kmem.lock);
 }
 
+// Same as kfree but for superpages
+void
+kfreesuper(void *pa)
+{
+  struct run *r;
+
+  if(((uint64)pa % SUPERPGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
+    panic("kfree");
+
+  // Fill with junk to catch dangling refs.
+  memset(pa, 1, SUPERPGSIZE);
+
+  r = (struct run*)pa;
+
+  acquire(&kmem.lock);
+  r->next = kmem.freelistsuper;
+  kmem.freelistsuper = r;
+  release(&kmem.lock);
+}
+
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
@@ -78,5 +111,21 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+  return (void*)r;
+}
+// Again same as kalloc but for superpages
+void *
+kallocsuper(void)
+{
+  struct run *r;
+
+  acquire(&kmem.lock);
+  r = kmem.freelistsuper;
+  if(r)
+    kmem.freelistsuper = r->next;
+  release(&kmem.lock);
+
+  if(r)
+    memset((char*)r, 6, SUPERPGSIZE); // fill with junk
   return (void*)r;
 }

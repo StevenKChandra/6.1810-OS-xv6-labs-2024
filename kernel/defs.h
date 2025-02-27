@@ -65,7 +65,9 @@ void            ramdiskrw(struct buf*);
 
 // kalloc.c
 void*           kalloc(void);
+void*           kallocsuper(void);
 void            kfree(void *);
+void            kfreesuper(void *);
 void            kinit(void);
 
 // log.c
