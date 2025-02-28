@@ -77,8 +77,40 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2) 
     yield();
+
+  // activates alarm and modified user state to run handler function
+  // this happens if:
+  // - device is interupted
+  // - user system is not running handler function
+  // - alarm is active
+  // - countdown reaches 0;
+  // it first saves caller saved registers, including return address(to mimic function call),
+  // then resets the alarm count, changes the handlerActive indicator,
+  // and changes the user process program counter to the top hander function
+  if (which_dev == 2 && !p->handlerActive && p->alarmInterval != 0 && --p->alarmCount == 0) {
+
+    p->trapframe->alarm_t0 = p->trapframe->t0;
+    p->trapframe->alarm_t2 = p->trapframe->t2;
+    p->trapframe->alarm_t3 = p->trapframe->t3;
+    p->trapframe->alarm_t4 = p->trapframe->t4;
+    p->trapframe->alarm_t5 = p->trapframe->t5;
+    p->trapframe->alarm_t6 = p->trapframe->t6;
+    p->trapframe->alarm_a0 = p->trapframe->a0;
+    p->trapframe->alarm_a1 = p->trapframe->a1;
+    p->trapframe->alarm_a2 = p->trapframe->a2;
+    p->trapframe->alarm_a3 = p->trapframe->a3;
+    p->trapframe->alarm_a4 = p->trapframe->a4;
+    p->trapframe->alarm_a5 = p->trapframe->a5;
+    p->trapframe->alarm_a6 = p->trapframe->a6;
+    p->trapframe->alarm_a7 = p->trapframe->a7;
+    p->trapframe->ra = p->trapframe->epc;
+    
+    p->handlerActive = 1;
+    p->alarmCount = p->alarmInterval;
+    p->trapframe->epc = (uint64) p->alarmHandler;
+  }
 
   usertrapret();
 }

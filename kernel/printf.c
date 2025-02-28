@@ -166,6 +166,7 @@ panic(char *s)
   printf("panic: ");
   printf("%s\n", s);
   panicked = 1; // freeze uart output from other CPUs
+  backtrace(); // backtrace the cause of panic
   for(;;)
     ;
 }
@@ -175,4 +176,22 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+/*
+prints the list of the function calls on the stack above
+*/
+void
+backtrace()
+{
+    uint64 sp = r_fp();
+    uint64 current_page_base = PGROUNDDOWN(sp);
+
+    printf("backtrace:\n");
+    while (PGROUNDDOWN(sp) == current_page_base) {
+        printf("0x00000000%lx\n", *(uint64 *) (sp-8));
+        sp = sp - 16;
+        sp = *(uint64 *) sp;
+    }
+    return;
 }

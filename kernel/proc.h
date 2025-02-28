@@ -77,6 +77,22 @@ struct trapframe {
   /* 264 */ uint64 t4;
   /* 272 */ uint64 t5;
   /* 280 */ uint64 t6;
+
+  // register to save when alarm handler is called
+  uint64 alarm_t0;
+  uint64 alarm_t2;
+  uint64 alarm_t3;
+  uint64 alarm_t4;
+  uint64 alarm_t5;
+  uint64 alarm_t6;
+  uint64 alarm_a0;
+  uint64 alarm_a1;
+  uint64 alarm_a2;
+  uint64 alarm_a3;
+  uint64 alarm_a4;
+  uint64 alarm_a5;
+  uint64 alarm_a6;
+  uint64 alarm_a7;
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
@@ -104,4 +120,8 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int alarmInterval;           // Number of ticks interval for alarm
+  void *alarmHandler;          // Pointer to handler function for alarm
+  int alarmCount;              // Number of ticks until handler is called
+  int handlerActive;           // Indicates if the alarm handler function is still running
 };
