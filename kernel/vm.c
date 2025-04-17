@@ -313,29 +313,26 @@ int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i;
+  uint64 pa, va;
   uint flags;
-  char *mem;
 
-  for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
+  for(va = 0; va < sz; va += PGSIZE){
+    if((pte = walk(old, va, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    flags = (PTE_FLAGS(*pte) & ~PTE_W) | PTE_S;
+    if(mappages(new, va, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    pa_share_modify((void *) pa, 1);
+    *pte = (*pte & ~PTE_W) | PTE_S;
   }
   return 0;
 
  err:
-  uvmunmap(new, 0, i / PGSIZE, 1);
+  uvmunmap(new, 0, va / PGSIZE, 1);
   return -1;
 }
 
@@ -358,7 +355,7 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0, pa0;
+  uint64 n, va0, pa0, flags;
   pte_t *pte;
 
   while(len > 0){
@@ -367,9 +364,24 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
       return -1;
     pte = walk(pagetable, va0, 0);
     if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+       ((*pte & PTE_W) == 0 && (*pte & PTE_S) == 0 ))
       return -1;
     pa0 = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if(flags & PTE_S) {
+        void *new_pa = kalloc();
+        if (new_pa == 0) {
+            panic("copy out: not enough memory for copy on write");
+        }
+        memmove(new_pa, (void *) pa0, PGSIZE);
+        uvmunmap(pagetable, va0, 1, 1);
+        flags = (flags & ~PTE_S) | PTE_W;
+        if(mappages(pagetable, va0, PGSIZE, (uint64) new_pa, flags) != 0){
+            uvmunmap(pagetable, 0, va0 / PGSIZE, 1);
+            panic("copy out: failed to map new page");
+        }
+        pa0 = (uint64) new_pa;
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

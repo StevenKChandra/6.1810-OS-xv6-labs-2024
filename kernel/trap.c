@@ -50,7 +50,40 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  // page fault
+  if(r_scause() == 15) {
+    uint64 va = PGROUNDDOWN(r_stval());
+    pagetable_t t =  p->pagetable;
+    pte_t *pte;
+    void *pa, *new_pa;
+    uint64 flags;
+    if ((pte = walk(t, va, 0)) == 0) {
+      panic("usertrap: write page fault on invalid pte");
+    }
+    flags = PTE_FLAGS(*pte);
+    if (!(flags & PTE_S)) {
+      panic("usertrap: write page fault on non shared pte");
+    }
+    if (flags & PTE_X) {
+      panic("usertrap: write page fault on executable pte");
+    }
+    pa = (void *) PTE2PA(*pte);
+    new_pa = kalloc();
+    if (new_pa == 0) {
+      printf("usertrap: not enough memory to create a write copy");
+      setkilled(p);
+    }
+    else {
+      memmove(new_pa, pa, PGSIZE);
+      uvmunmap(t, va, 1, 1);
+      flags = (flags & ~PTE_S) | PTE_W;
+      if(mappages(t, va, PGSIZE, (uint64) new_pa, flags) != 0){
+        uvmunmap(t, 0, va / PGSIZE, 1);
+        setkilled(p);
+      }
+    }
+    
+  } else if(r_scause() == 8){
     // system call
 
     if(killed(p))
