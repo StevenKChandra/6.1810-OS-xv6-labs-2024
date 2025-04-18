@@ -50,40 +50,41 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  // page fault
-  if(r_scause() == 15) {
-    uint64 va = PGROUNDDOWN(r_stval());
+  uint64 scause = r_scause();
+  uint64 stval = r_stval();
+
+  // copy on write page fault
+  if(scause == 15 && stval < MAXVA) {
+    uint64 va = PGROUNDDOWN(stval);
     pagetable_t t =  p->pagetable;
-    pte_t *pte;
     void *pa, *new_pa;
-    uint64 flags;
-    if ((pte = walk(t, va, 0)) == 0) {
-      panic("usertrap: write page fault on invalid pte");
-    }
-    flags = PTE_FLAGS(*pte);
-    if (!(flags & PTE_S)) {
-      panic("usertrap: write page fault on non shared pte");
-    }
-    if (flags & PTE_X) {
-      panic("usertrap: write page fault on executable pte");
-    }
-    pa = (void *) PTE2PA(*pte);
-    new_pa = kalloc();
-    if (new_pa == 0) {
-      printf("usertrap: not enough memory to create a write copy");
+    pte_t *pte = walk(t, va, 0);
+    uint64 flags = pte == 0 ? 0 : PTE_FLAGS(*pte);
+    // don't create copy on write page if pte is not valid, is executable, or is not shared.
+    if (pte == 0 || flags & PTE_X || !(flags & PTE_S)) {
+      printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
+      printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), stval);
       setkilled(p);
     }
     else {
-      memmove(new_pa, pa, PGSIZE);
-      uvmunmap(t, va, 1, 1);
-      flags = (flags & ~PTE_S) | PTE_W;
-      if(mappages(t, va, PGSIZE, (uint64) new_pa, flags) != 0){
-        uvmunmap(t, 0, va / PGSIZE, 1);
+      pa = (void *) PTE2PA(*pte);
+      new_pa = kalloc();
+      if (new_pa == 0) {
+        printf("usertrap: not enough memory to create a write copy");
         setkilled(p);
+      }
+      else {
+        memmove(new_pa, pa, PGSIZE);
+        uvmunmap(t, va, 1, 1);
+        flags = (flags & ~PTE_S) | PTE_W;
+        if(mappages(t, va, PGSIZE, (uint64) new_pa, flags) != 0){
+          uvmunmap(t, 0, va / PGSIZE, 1);
+          setkilled(p);
+        }
       }
     }
     
-  } else if(r_scause() == 8){
+  } else if(scause == 8){
     // system call
 
     if(killed(p))
@@ -101,8 +102,8 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
+    printf("usertrap(): unexpected scause 0x%lx pid=%d\n", scause, p->pid);
+    printf("            sepc=0x%lx stval=0x%lx\n", r_sepc(), stval);
     setkilled(p);
   }
 
