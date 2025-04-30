@@ -24,6 +24,38 @@ static inline uint32 bswapl(uint32 val)
 #define htonl bswapl
 
 
+// definitions for implementing ports
+#define MAX_PORT_NUMBER 65535
+#define MAX_PORT_BIND 64
+#define PORT_BUFFER_SIZE 16
+
+struct port {
+    int port_number;
+    uint16 last_write;
+    uint16 r_idx;
+    uint16 w_idx;
+    void * rotary_buffer[PORT_BUFFER_SIZE];
+};
+
+struct ports_array {
+    struct port port[MAX_PORT_BIND];
+    int (*add)(int port_number, struct ports_array*);
+    int (*remove)(int port_number, struct ports_array*);
+    int (*find)(int port_number, struct ports_array*);
+    int (*enqueue)(int port_number, void *, struct ports_array*);
+    int (*dequeue)(int port_number, void **, struct ports_array*);
+};
+
+int find(int, struct ports_array*);
+
+int add(int, struct ports_array*);
+
+int remove(int, struct ports_array*);
+
+int enqueue(int, void *, struct ports_array*);
+
+int dequeue(int, void **, struct ports_array*);
+
 //
 // useful networking headers
 //

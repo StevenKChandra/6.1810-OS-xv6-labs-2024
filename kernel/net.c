@@ -19,10 +19,146 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 
 static struct spinlock netlock;
 
+static struct ports_array ports_array; // holds binded ports
+
+static struct spinlock portlock;
+
+static void init_ports() {
+  for (int i = 0; i < MAX_PORT_BIND; i++) {
+    ports_array.port[i].port_number = -1;
+    ports_array.port[i].last_write = 0;
+    ports_array.port[i].r_idx = 0;
+    ports_array.port[i].w_idx = 0;
+    for (int j = 0; j < PORT_BUFFER_SIZE; j++) {
+      ports_array.port[i].rotary_buffer[j] = 0;
+    }
+  }
+  ports_array.find = find;
+  ports_array.add = add;
+  ports_array.remove = remove;
+  ports_array.enqueue = enqueue;
+  ports_array.dequeue = dequeue;
+}
+
+/**
+ * Finds the index of a given port number in the ports_array structure
+ * @param port port number to find
+ * @param ports_array pointer to ports_array structure 
+ * 
+ * @return the index of the port if it is in the structure,
+ *      otherwise -1
+ */
+int find(int port, struct ports_array* ports_array) {
+    for (int i = 0; i < MAX_PORT_BIND; i++) {
+        if ((*ports_array).port[i].port_number == port) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Adds a given port number to the ports_array structure
+ * @param port port number to add
+ * @param ports_array pointer to ports_array structure 
+ * 
+ * @return -1 if the ports_array is full, otherwise 0
+ */
+int add(int port, struct ports_array* ports_array) {
+    for (int i = 0; i < MAX_PORT_BIND; i++) {
+        if ((*ports_array).port[i].port_number == -1) {
+            (*ports_array).port[i].port_number = port;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/**
+ * Removes a given port number from the ports_array structure
+ * @param port port number to remove
+ * @param ports_array pointer to ports_array structure 
+ * 
+ * @return -1 if the port number does not exist in the ports_array strucature
+ *      otherwise 0
+ */
+int remove(int port, struct ports_array* ports_array) {
+    int index = (*ports_array).find(port, ports_array);
+    if (index == -1) {
+        return -1;
+    }
+    struct port *p = &(*ports_array).port[index];
+    int buffered_data_len = p->w_idx - p->r_idx;
+    buffered_data_len %= PORT_BUFFER_SIZE;
+    if (buffered_data_len == 0 && p->last_write == 1) {
+        buffered_data_len = 16;
+    }
+    for (int j = 0; j < buffered_data_len; j++) {
+        int index = (p->r_idx + j) % PORT_BUFFER_SIZE;
+        kfree((void *) p->rotary_buffer[index]);
+    }
+    p->port_number = -1;
+    p->last_write = 0;
+    p->r_idx = 0;
+    p->w_idx = 0;
+    return 0;
+}
+
+/**
+ * Adds a buffer to the given port number fifo queue
+ * @param port port number to remove
+ * @param buf pointer to the buffer
+ * @param ports_array pointer to ports_array structure 
+ * 
+ * @return -1 if port is does not exist or the queue is full, otherwise 0
+ */
+
+int enqueue(int port, void* buf, struct ports_array* ports_array) {
+    int index = (*ports_array).find(port, ports_array);
+    if (index == -1) {
+        return -1;
+    }
+    struct port *p = &(*ports_array).port[index];
+    if (p->last_write == 1 && p->r_idx == p->w_idx) {
+        return -1;
+    }
+    p->rotary_buffer[p->w_idx] = buf;
+    p->last_write = 1;
+    p->w_idx = (p->w_idx + 1) % PORT_BUFFER_SIZE;
+    return 0;
+}
+
+/**
+ * Removes oldest buffer from the given port number fifo queue,
+ * the address of the buffer is copied to given pointer's address
+ * @param port port number to remove
+ * @param buf address of buffer pointer
+ * @param ports_array pointer to ports_array structure 
+ * 
+ * @return -1 if port is does not exist or the queue is empty, otherwise 0
+ */
+
+int dequeue(int port, void** buf, struct ports_array* ports_array) {
+    int index = (*ports_array).find(port, ports_array);
+    if (index == -1) {
+        return -1;
+    }
+    struct port *p = &(*ports_array).port[index];
+    if (p->last_write == 0 && p->r_idx == p->w_idx) {
+        return -1;
+    }
+    *buf = p->rotary_buffer[p->r_idx];
+    p->last_write = 0;
+    p->r_idx = (p->r_idx + 1) % PORT_BUFFER_SIZE;
+    return 0;
+}
+
 void
 netinit(void)
 {
   initlock(&netlock, "netlock");
+  initlock(&portlock, "portlock");
+  init_ports();
 }
 
 
@@ -34,11 +170,29 @@ netinit(void)
 uint64
 sys_bind(void)
 {
-  //
-  // Your code here.
-  //
+    int port;
+    argint(0, &port);
 
-  return -1;
+    acquire(&portlock);
+    // check if port number is valid
+    if (port < 0 || port > MAX_PORT_NUMBER) {
+        release(&portlock);
+        return -1;
+    }
+
+    // check if port is already binded
+    if (ports_array.find(port, &ports_array) != -1) {
+        release(&portlock);
+        return -1;
+    }
+
+    if (ports_array.add(port, &ports_array) != 0) {
+        release(&portlock);
+        return -1;
+    };
+
+    release(&portlock);
+    return 0;
 }
 
 //
@@ -49,11 +203,20 @@ sys_bind(void)
 uint64
 sys_unbind(void)
 {
-  //
-  // Optional: Your code here.
-  //
+    int port;
+    argint(0, &port);
 
-  return 0;
+    acquire(&portlock);
+    if (ports_array.find(port, &ports_array) == -1) {
+        release(&portlock);
+        return -1;
+    }
+    if (ports_array.find(port, & ports_array) == 0) {
+        release(&portlock);
+        return -1;
+    };
+    release(&portlock);
+    return 0;
 }
 
 //
@@ -74,10 +237,61 @@ sys_unbind(void)
 uint64
 sys_recv(void)
 {
-  //
-  // Your code here.
-  //
-  return -1;
+    int dport, maxlength;
+    uint64 src, sport, buf;
+    
+    argint(0, &dport);
+    argaddr(1, &src);
+    argaddr(2, &sport);
+    argaddr(3, &buf);
+    argint(4, &maxlength);
+
+    acquire(&portlock);
+    if (dport < 0 || dport > MAX_PORT_NUMBER) {
+        return -1;
+    }
+
+    if (ports_array.find(dport, &ports_array) == -1) {
+        return -1;
+    }
+
+    void *packet;
+    while (ports_array.dequeue(dport, &packet, &ports_array)) {
+        sleep(&ports_array, &portlock);
+    }
+
+    struct eth *ineth = (struct eth *) packet;
+    struct ip *inip = (struct ip *) (ineth + 1);
+    struct udp *inudp = (struct udp *) (inip + 1);
+    char *payload = (char *) (inudp + 1);
+
+    uint32 ip_src = ntohl(inip->ip_src);
+    uint16 port_src = ntohs(inudp->sport);
+    int payload_len = ntohs(inudp->ulen) - 8;
+
+    pagetable_t pagetable = myproc()->pagetable;
+
+    if (copyout(pagetable, src, (char *) &ip_src, 4) != 0) {
+        release(&portlock);
+        kfree(packet);
+        return -1;
+    }
+
+    if (copyout(pagetable, sport, (char *) &port_src, 2) != 0) {
+        release(&portlock);
+        kfree(packet);
+        return -1;
+    }
+
+    int copy_len = payload_len > maxlength ? maxlength : payload_len;
+    if (copyout(pagetable, buf, payload, copy_len) != 0) {
+        release(&portlock);
+        kfree(packet);
+        return -1;
+    }
+    release(&portlock);
+    kfree(packet);
+    return copy_len;
 }
 
 // This code is lifted from FreeBSD's ping.c, and is copyright by the Regents
@@ -188,10 +402,28 @@ ip_rx(char *buf, int len)
     printf("ip_rx: received an IP packet\n");
   seen_ip = 1;
 
-  //
-  // Your code here.
-  //
-  
+  struct eth *ineth = (struct eth *) buf;
+  struct ip *inip = (struct ip *) (ineth + 1);
+
+  if (inip->ip_p == IPPROTO_UDP) {
+    struct udp *inudp = (struct udp *) (inip + 1);
+    acquire(&portlock);
+    if (ports_array.find(ntohs(inudp->dport), &ports_array) == -1) {
+      release(&portlock);
+      kfree(buf);
+      return;
+    }
+    if (ports_array.enqueue(ntohs(inudp->dport), buf, &ports_array) == -1) {
+      release(&portlock);
+      kfree(buf);
+      return;
+    }
+    release(&portlock);
+    wakeup(&ports_array);
+    return;
+  }
+  kfree(buf);
+  return;
 }
 
 //
